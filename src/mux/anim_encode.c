@@ -786,10 +786,9 @@ typedef struct {
 // Generates a candidate encoded frame given a picture and metadata.
 static WebPEncodingError EncodeCandidate(WebPPicture* const sub_frame,
                                          const FrameRectangle* const rect,
-                                         const WebPConfig* const encoder_config,
+                                         const WebPConfig* const config,
                                          int use_blending,
                                          Candidate* const candidate) {
-  WebPConfig config = *encoder_config;
   WebPEncodingError error_code = VP8_ENC_OK;
   assert(candidate != NULL);
   memset(candidate, 0, sizeof(*candidate));
@@ -807,13 +806,7 @@ static WebPEncodingError EncodeCandidate(WebPPicture* const sub_frame,
   // Encode picture.
   WebPMemoryWriterInit(&candidate->mem_);
 
-  if (!config.lossless && use_blending) {
-    // Disable filtering to avoid blockiness in reconstructed frames at the
-    // time of decoding.
-    config.autofilter = 0;
-    config.filter_strength = 0;
-  }
-  if (!EncodeFrame(&config, sub_frame, &candidate->mem_)) {
+  if (!EncodeFrame(config, sub_frame, &candidate->mem_)) {
     error_code = sub_frame->error_code;
     goto Err;
   }
