@@ -33,7 +33,11 @@ set(WEBP_SIMD_FILE_EXTENSIONS
     "_sse41.c;_sse2.c;_mips32.c;_mips_dsp_r2.c;_neon.c;_msa.c")
 if(MSVC)
   # MSVC does not have a SSE4 flag but AVX support implies SSE4 support.
-  set(SIMD_ENABLE_FLAGS "/arch:AVX;/arch:SSE2;;;;")
+  # However, using AVX flag will emit AVX instruction without runtime check.
+  # MSVC claims to attempt higher SSE/AVX level anyway with runtime check.
+  list(REMOVE_AT WEBP_SIMD_FLAGS 0)
+  list(REMOVE_AT WEBP_SIMD_FILE_EXTENSIONS 0)
+  set(SIMD_ENABLE_FLAGS "/arch:SSE2;;;;")
   set(SIMD_DISABLE_FLAGS)
 else()
   set(SIMD_ENABLE_FLAGS
