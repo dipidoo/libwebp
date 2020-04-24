@@ -874,6 +874,7 @@ static WebPEncodingError GenerateCandidates(
       !is_key_frame &&
       IsLossyBlendingPossible(prev_canvas, curr_canvas, &params->rect_lossy_,
                               config_lossy->quality);
+  use_blending_lossy = 0;
 
   // Pick candidates to be tried.
   if (!enc->options_.allow_mixed) {
