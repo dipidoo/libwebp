@@ -423,6 +423,122 @@ int WebPAnimDecoderGetNext(WebPAnimDecoder* dec,
   return 0;
 }
 
+int WebPAnimDecoderGetNextDirect(WebPAnimDecoder* dec,
+                           uint8_t* buf_ptr, int* timestamp_ptr) {
+  WebPIterator iter;
+  uint32_t width;
+  uint32_t height;
+  int is_key_frame;
+  int timestamp;
+  BlendRowFunc blend_row;
+
+  if (dec == NULL || buf_ptr == NULL || timestamp_ptr == NULL) return 0;
+  if (!WebPAnimDecoderHasMoreFrames(dec)) return 0;
+
+  width = dec->info_.canvas_width;
+  height = dec->info_.canvas_height;
+  blend_row = dec->blend_func_;
+
+  // Get compressed frame.
+  if (!WebPDemuxGetFrame(dec->demux_, dec->next_frame_, &iter)) {
+    return 0;
+  }
+  timestamp = dec->prev_frame_timestamp_ + iter.duration;
+
+  // Initialize.
+  is_key_frame = IsKeyFrame(&iter, &dec->prev_iter_,
+                            dec->prev_frame_was_keyframe_, width, height);
+  if (is_key_frame) {
+    if (!ZeroFillCanvas(buf_ptr, width, height)) {
+      goto Error;
+    }
+  } else {
+    if (!CopyCanvas(dec->prev_frame_disposed_, buf_ptr,
+                    width, height)) {
+      goto Error;
+    }
+  }
+
+  // Decode.
+  {
+    const uint8_t* in = iter.fragment.bytes;
+    const size_t in_size = iter.fragment.size;
+    const size_t out_offset =
+        (iter.y_offset * width + iter.x_offset) * NUM_CHANNELS;
+    WebPDecoderConfig* const config = &dec->config_;
+    WebPRGBABuffer* const buf = &config->output.u.RGBA;
+    buf->stride = NUM_CHANNELS * width;
+    buf->size = buf->stride * iter.height;
+    buf->rgba = buf_ptr + out_offset;
+
+    if (WebPDecode(in, in_size, config) != VP8_STATUS_OK) {
+      goto Error;
+    }
+  }
+
+  // During the decoding of current frame, we may have set some pixels to be
+  // transparent (i.e. alpha < 255). However, the value of each of these
+  // pixels should have been determined by blending it against the value of
+  // that pixel in the previous frame if blending method of is WEBP_MUX_BLEND.
+  if (iter.frame_num > 1 && iter.blend_method == WEBP_MUX_BLEND &&
+      !is_key_frame) {
+    if (dec->prev_iter_.dispose_method == WEBP_MUX_DISPOSE_NONE) {
+      int y;
+      // Blend transparent pixels with pixels in previous canvas.
+      for (y = 0; y < iter.height; ++y) {
+        const size_t offset =
+            (iter.y_offset + y) * width + iter.x_offset;
+        blend_row((uint32_t*)buf_ptr + offset,
+                  (uint32_t*)dec->prev_frame_disposed_ + offset, iter.width);
+      }
+    } else {
+      int y;
+      assert(dec->prev_iter_.dispose_method == WEBP_MUX_DISPOSE_BACKGROUND);
+      // We need to blend a transparent pixel with its value just after
+      // initialization. That is, blend it with:
+      // * Fully transparent pixel if it belongs to prevRect <-- No-op.
+      // * The pixel in the previous canvas otherwise <-- Need alpha-blending.
+      for (y = 0; y < iter.height; ++y) {
+        const int canvas_y = iter.y_offset + y;
+        int left1, width1, left2, width2;
+        FindBlendRangeAtRow(&iter, &dec->prev_iter_, canvas_y, &left1, &width1,
+                            &left2, &width2);
+        if (width1 > 0) {
+          const size_t offset1 = canvas_y * width + left1;
+          blend_row((uint32_t*)buf_ptr + offset1,
+                    (uint32_t*)dec->prev_frame_disposed_ + offset1, width1);
+        }
+        if (width2 > 0) {
+          const size_t offset2 = canvas_y * width + left2;
+          blend_row((uint32_t*)buf_ptr + offset2,
+                    (uint32_t*)dec->prev_frame_disposed_ + offset2, width2);
+        }
+      }
+    }
+  }
+
+  // Update info of the previous frame and dispose it for the next iteration.
+  dec->prev_frame_timestamp_ = timestamp;
+  WebPDemuxReleaseIterator(&dec->prev_iter_);
+  dec->prev_iter_ = iter;
+  dec->prev_frame_was_keyframe_ = is_key_frame;
+  CopyCanvas(buf_ptr, dec->prev_frame_disposed_, width, height);
+  if (dec->prev_iter_.dispose_method == WEBP_MUX_DISPOSE_BACKGROUND) {
+    ZeroFillFrameRect(dec->prev_frame_disposed_, width * NUM_CHANNELS,
+                      dec->prev_iter_.x_offset, dec->prev_iter_.y_offset,
+                      dec->prev_iter_.width, dec->prev_iter_.height);
+  }
+  ++dec->next_frame_;
+
+  // All OK, fill in the values.
+  *timestamp_ptr = timestamp;
+  return 1;
+
+ Error:
+  WebPDemuxReleaseIterator(&iter);
+  return 0;
+}
+
 int WebPAnimDecoderHasMoreFrames(const WebPAnimDecoder* dec) {
   if (dec == NULL) return 0;
   return (dec->next_frame_ <= (int)dec->info_.frame_count);
