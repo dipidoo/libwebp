@@ -324,6 +324,9 @@ WEBP_EXTERN int WebPAnimDecoderGetInfo(const WebPAnimDecoder* dec,
 WEBP_EXTERN int WebPAnimDecoderGetNext(WebPAnimDecoder* dec,
                                        uint8_t** buf, int* timestamp);
 
+WEBP_EXTERN int WebPAnimDecoderGetNextDirect(WebPAnimDecoder* dec,
+                                             uint8_t* buf, int* timestamp);
+
 // Check if there are more frames left to decode.
 // Parameters:
 //   dec - (in) decoder instance to be checked.
